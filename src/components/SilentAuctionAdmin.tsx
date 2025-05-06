@@ -31,7 +31,7 @@ export default function SilentAuctionAdmin() {
   const [attendeeName, setAttendeeName] = useState('');
   const [attendeeBidNum, setAttendeeBidNum] = useState('');
   const [winningBidNum, setWinningBidNum] = useState('');
-  const [winningBidAmount, setWinningBidAmount] = useState<number>(0);
+  const [winningBidAmount, setWinningBidAmount] = useState<string>('');
   const [itemSearchTerm, setItemSearchTerm] = useState('');
   const [selectedItemId, setSelectedItemId] = useState('');
   
@@ -130,7 +130,7 @@ export default function SilentAuctionAdmin() {
       return;
     }
     
-    const bidAmount = parseFloat(winningBidAmount.toString());
+    const bidAmount = parseFloat(winningBidAmount);
     if (isNaN(bidAmount)) {
       alert('Please enter a valid bid amount');
       return;
@@ -183,7 +183,7 @@ export default function SilentAuctionAdmin() {
     
     // Clear form
     setWinningBidNum('');
-    setWinningBidAmount(0);
+    setWinningBidAmount('');
   };
   
   // Print attendee results
@@ -370,8 +370,8 @@ export default function SilentAuctionAdmin() {
     <div className="min-h-screen bg-gray-100">
       {/* Print Mode */}
       {printMode && searchedAttendee && searchResults && (
-        <div className="p-8 bg-white">
-          <h1 className="text-3xl font-bold mb-6">Silent Auction Receipt</h1>
+        <div className="print-only p-8 bg-white">
+          <h1 className="text-3xl font-bold mb-6">BBA Auction 2025</h1>
           <div className="mb-6">
             <h2 className="text-xl font-semibold">Attendee Information</h2>
             <p className="text-lg">Name: {searchedAttendee.name}</p>
@@ -814,7 +814,7 @@ export default function SilentAuctionAdmin() {
                         <input
                           type="number"
                           value={winningBidAmount}
-                          onChange={(e) => setWinningBidAmount(parseFloat(e.target.value))}
+                          onChange={(e) => setWinningBidAmount(e.target.value)}
                           step="0.01"
                           min="0"
                           className="w-full p-2 border rounded"
@@ -1096,14 +1096,23 @@ export default function SilentAuctionAdmin() {
           body * {
             visibility: hidden;
           }
-          .print-mode, .print-mode * {
+          .print-only,
+          .print-only * {
             visibility: visible;
           }
-          .print-mode {
+          .print-only {
             position: absolute;
             left: 0;
             top: 0;
             width: 100%;
+            height: 100%;
+            background: white;
+            margin: 0;
+            padding: 20px;
+          }
+          @page {
+            size: auto;
+            margin: 20mm;
           }
         }
       `}</style>
