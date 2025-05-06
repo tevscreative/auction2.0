@@ -27,7 +27,6 @@ export default function SilentAuctionAdmin() {
   const [itemName, setItemName] = useState('');
   const [itemId, setItemId] = useState('');
   const [itemSection, setItemSection] = useState('');
-  const [searchItemId, setSearchItemId] = useState('');
   const [searchAttendeeBidNum, setSearchAttendeeBidNum] = useState('');
   const [attendeeName, setAttendeeName] = useState('');
   const [attendeeBidNum, setAttendeeBidNum] = useState('');
@@ -124,25 +123,6 @@ export default function SilentAuctionAdmin() {
     setAttendeeBidNum('');
   };
   
-  // Search for item by ID
-  const handleSearchItem = () => {
-    if (!searchItemId) {
-      alert('Please enter an item ID');
-      return;
-    }
-    
-    const item = items.find(item => item.id === searchItemId);
-    
-    if (!item) {
-      alert(`No item found with ID ${searchItemId}`);
-      return;
-    }
-    
-    setSearchedItem(item);
-    setSearchResults(null);
-    setSearchedAttendee(null);
-  };
-  
   // Add winning bid to item
   const handleAddWinningBid = () => {
     if (!winningBidNum || !winningBidAmount || !searchedItem) {
@@ -204,30 +184,6 @@ export default function SilentAuctionAdmin() {
     // Clear form
     setWinningBidNum('');
     setWinningBidAmount(0);
-  };
-  
-  // Search for attendee
-  const handleSearchAttendee = () => {
-    if (!searchAttendeeBidNum) {
-      alert('Please enter a bid number');
-      return;
-    }
-    
-    const attendee = attendees.find(att => att.bidNum === searchAttendeeBidNum);
-    
-    if (!attendee) {
-      alert(`No attendee found with Bid # ${searchAttendeeBidNum}`);
-      return;
-    }
-    
-    // Find all items won by this attendee
-    const wonItems = items.filter(item => 
-      item.winningBid && item.winningBid.bidNum === attendee.bidNum
-    );
-    
-    setSearchedAttendee(attendee);
-    setSearchResults(wonItems);
-    setSearchedItem(null);
   };
   
   // Print attendee results
