@@ -1,20 +1,5 @@
 import { useState, useEffect } from 'react';
-
-interface Item {
-  id: string;
-  name: string;
-  section: string;
-  winningBid: {
-    bidNum: string;
-    amount: number;
-  } | null;
-}
-
-interface Attendee {
-  name: string;
-  bidNum: string;
-  wonItems: string[];
-}
+import { itemsService, attendeesService, Item, Attendee } from '../services/database';
 
 export default function SilentAuctionAdmin() {
   // State for auction items
@@ -47,30 +32,99 @@ export default function SilentAuctionAdmin() {
   const [editBidNum, setEditBidNum] = useState('');
   const [editBidAmount, setEditBidAmount] = useState<number>(0);
   
+  // Add state for editing items
+  const [editingItem, setEditingItem] = useState<Item | null>(null);
+  const [editItemName, setEditItemName] = useState('');
+  const [editItemId, setEditItemId] = useState('');
+  const [editItemSection, setEditItemSection] = useState('');
+  
+  // Add state for editing attendees
+  const [editingAttendee, setEditingAttendee] = useState<Attendee | null>(null);
+  const [editAttendeeName, setEditAttendeeName] = useState('');
+  const [editAttendeeBidNum, setEditAttendeeBidNum] = useState('');
+  
   // Add state for sorting
   const [sortBy, setSortBy] = useState<'id' | 'name' | 'section' | 'status'>('id');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   
-  // Load initial data from localStorage if available
+  // Loading and error states
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  
+  // Load initial data from Supabase
   useEffect(() => {
-    const savedItems = localStorage.getItem('auctionItems');
-    const savedAttendees = localStorage.getItem('auctionAttendees');
+    const loadData = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const [itemsData, attendeesData] = await Promise.all([
+          itemsService.getAll(),
+          attendeesService.getAll()
+        ]);
+        setItems(itemsData);
+        setAttendees(attendeesData);
+      } catch (err) {
+        console.error('Error loading data:', err);
+        setError('Failed to load data. Please check your Supabase connection.');
+        // Fallback to localStorage if Supabase fails (for migration period)
+        try {
+          const savedItems = localStorage.getItem('auctionItems');
+          const savedAttendees = localStorage.getItem('auctionAttendees');
+          if (savedItems) setItems(JSON.parse(savedItems));
+          if (savedAttendees) setAttendees(JSON.parse(savedAttendees));
+        } catch (localErr) {
+          console.error('Error loading from localStorage:', localErr);
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
     
-    if (savedItems) setItems(JSON.parse(savedItems));
-    if (savedAttendees) setAttendees(JSON.parse(savedAttendees));
+    loadData();
   }, []);
   
-  // Save data to localStorage whenever it changes
+  // Set up real-time subscriptions
   useEffect(() => {
-    localStorage.setItem('auctionItems', JSON.stringify(items));
-  }, [items]);
-  
-  useEffect(() => {
-    localStorage.setItem('auctionAttendees', JSON.stringify(attendees));
-  }, [attendees]);
+    const itemsChannel = itemsService.subscribe((payload) => {
+      if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+        const newItem = payload.new as Item;
+        setItems(prev => {
+          const existing = prev.findIndex(item => item.id === newItem.id);
+          if (existing >= 0) {
+            return prev.map((item, idx) => idx === existing ? newItem : item);
+          }
+          return [...prev, newItem];
+        });
+      } else if (payload.eventType === 'DELETE') {
+        const oldItem = payload.old as { id: string };
+        setItems(prev => prev.filter(item => item.id !== oldItem.id));
+      }
+    });
+    
+    const attendeesChannel = attendeesService.subscribe((payload) => {
+      if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+        const newAttendee = payload.new as Attendee;
+        setAttendees(prev => {
+          const existing = prev.findIndex(att => att.bidNum === newAttendee.bidNum);
+          if (existing >= 0) {
+            return prev.map((att, idx) => idx === existing ? newAttendee : att);
+          }
+          return [...prev, newAttendee];
+        });
+      } else if (payload.eventType === 'DELETE') {
+        const oldAttendee = payload.old as { bidNum: string };
+        setAttendees(prev => prev.filter(att => att.bidNum !== oldAttendee.bidNum));
+      }
+    });
+    
+    return () => {
+      itemsChannel.unsubscribe();
+      attendeesChannel.unsubscribe();
+    };
+  }, []);
   
   // Add new auction item
-  const handleAddItem = () => {
+  const handleAddItem = async () => {
     if (!itemName || !itemId || !itemSection) {
       alert('Please fill in all fields');
       return;
@@ -82,23 +136,30 @@ export default function SilentAuctionAdmin() {
       return;
     }
     
-    const newItem = {
-      name: itemName,
-      id: itemId,
-      section: itemSection,
-      winningBid: null
-    };
-    
-    setItems([...items, newItem]);
-    
-    // Clear form
-    setItemName('');
-    setItemId('');
-    setItemSection('');
+    try {
+      const newItem = {
+        name: itemName,
+        id: itemId,
+        section: itemSection,
+        winningBid: null
+      };
+      
+      await itemsService.create(newItem);
+      // State will be updated via real-time subscription or we can update manually
+      setItems([...items, newItem]);
+      
+      // Clear form
+      setItemName('');
+      setItemId('');
+      setItemSection('');
+    } catch (err) {
+      console.error('Error adding item:', err);
+      alert('Failed to add item. Please try again.');
+    }
   };
   
   // Add new attendee
-  const handleAddAttendee = () => {
+  const handleAddAttendee = async () => {
     if (!attendeeName || !attendeeBidNum) {
       alert('Please fill in all fields');
       return;
@@ -110,21 +171,28 @@ export default function SilentAuctionAdmin() {
       return;
     }
     
-    const newAttendee = {
-      name: attendeeName,
-      bidNum: attendeeBidNum,
-      wonItems: []
-    };
-    
-    setAttendees([...attendees, newAttendee]);
-    
-    // Clear form
-    setAttendeeName('');
-    setAttendeeBidNum('');
+    try {
+      const newAttendee = {
+        name: attendeeName,
+        bidNum: attendeeBidNum,
+        wonItems: []
+      };
+      
+      await attendeesService.create(newAttendee);
+      // State will be updated via real-time subscription or we can update manually
+      setAttendees([...attendees, newAttendee]);
+      
+      // Clear form
+      setAttendeeName('');
+      setAttendeeBidNum('');
+    } catch (err) {
+      console.error('Error adding attendee:', err);
+      alert('Failed to add attendee. Please try again.');
+    }
   };
   
   // Add winning bid to item
-  const handleAddWinningBid = () => {
+  const handleAddWinningBid = async () => {
     if (!winningBidNum || !winningBidAmount || !searchedItem) {
       alert('Please fill in all fields');
       return;
@@ -144,46 +212,56 @@ export default function SilentAuctionAdmin() {
       return;
     }
     
-    // Update the item
-    const updatedItems = items.map(item => {
-      if (item.id === searchedItem.id) {
-        return {
-          ...item,
-          winningBid: {
-            bidNum: winningBidNum,
-            amount: bidAmount
-          }
-        };
-      }
-      return item;
-    });
-    
-    // Update the attendee's won items
-    const updatedAttendees = attendees.map(att => {
-      if (att.bidNum === winningBidNum) {
-        return {
-          ...att,
-          wonItems: [...att.wonItems.filter(id => id !== searchedItem.id), searchedItem.id]
-        };
-      }
-      return att;
-    });
-    
-    setItems(updatedItems);
-    setAttendees(updatedAttendees);
-    
-    // Update the searched item
-    setSearchedItem({
-      ...searchedItem,
-      winningBid: {
+    try {
+      const winningBid = {
         bidNum: winningBidNum,
         amount: bidAmount
-      }
-    });
-    
-    // Clear form
-    setWinningBidNum('');
-    setWinningBidAmount('');
+      };
+      
+      // Update the item in database
+      await itemsService.update(searchedItem.id, { winningBid });
+      
+      // Update the attendee's won items
+      const updatedWonItems = [...attendee.wonItems.filter(id => id !== searchedItem.id), searchedItem.id];
+      await attendeesService.update(winningBidNum, { wonItems: updatedWonItems });
+      
+      // Update local state (will also be updated via real-time subscription)
+      const updatedItems = items.map(item => {
+        if (item.id === searchedItem.id) {
+          return {
+            ...item,
+            winningBid
+          };
+        }
+        return item;
+      });
+      
+      const updatedAttendees = attendees.map(att => {
+        if (att.bidNum === winningBidNum) {
+          return {
+            ...att,
+            wonItems: updatedWonItems
+          };
+        }
+        return att;
+      });
+      
+      setItems(updatedItems);
+      setAttendees(updatedAttendees);
+      
+      // Update the searched item
+      setSearchedItem({
+        ...searchedItem,
+        winningBid
+      });
+      
+      // Clear form
+      setWinningBidNum('');
+      setWinningBidAmount('');
+    } catch (err) {
+      console.error('Error adding winning bid:', err);
+      alert('Failed to record winning bid. Please try again.');
+    }
   };
   
   // Print attendee results
@@ -196,15 +274,27 @@ export default function SilentAuctionAdmin() {
   };
   
   // Clear data - development helper
-  const handleClearData = () => {
+  const handleClearData = async () => {
     if (window.confirm('Are you sure you want to clear all data? This cannot be undone.')) {
-      setItems([]);
-      setAttendees([]);
-      setSearchedItem(null);
-      setSearchResults(null);
-      setSearchedAttendee(null);
-      localStorage.removeItem('auctionItems');
-      localStorage.removeItem('auctionAttendees');
+      try {
+        // Delete all items
+        await Promise.all(items.map(item => itemsService.delete(item.id)));
+        // Delete all attendees
+        await Promise.all(attendees.map(attendee => attendeesService.delete(attendee.bidNum)));
+        
+        setItems([]);
+        setAttendees([]);
+        setSearchedItem(null);
+        setSearchResults(null);
+        setSearchedAttendee(null);
+        
+        // Also clear localStorage for migration period
+        localStorage.removeItem('auctionItems');
+        localStorage.removeItem('auctionAttendees');
+      } catch (err) {
+        console.error('Error clearing data:', err);
+        alert('Failed to clear all data. Please try again.');
+      }
     }
   };
   
@@ -298,7 +388,7 @@ export default function SilentAuctionAdmin() {
   };
 
   // Add function to handle editing winning bid
-  const handleEditWinningBid = () => {
+  const handleEditWinningBid = async () => {
     if (!searchedItem || !editBidNum || !editBidAmount) {
       alert('Please fill in all fields');
       return;
@@ -317,29 +407,36 @@ export default function SilentAuctionAdmin() {
       return;
     }
 
-    // Update the item
-    const updatedItems = items.map(item => {
-      if (item.id === searchedItem.id) {
-        return {
-          ...item,
-          winningBid: {
-            bidNum: editBidNum,
-            amount: bidAmount
-          }
-        };
-      }
-      return item;
-    });
-
-    setItems(updatedItems);
-    setSearchedItem({
-      ...searchedItem,
-      winningBid: {
+    try {
+      const winningBid = {
         bidNum: editBidNum,
         amount: bidAmount
-      }
-    });
-    setIsEditingBid(false);
+      };
+      
+      // Update the item in database
+      await itemsService.update(searchedItem.id, { winningBid });
+      
+      // Update local state
+      const updatedItems = items.map(item => {
+        if (item.id === searchedItem.id) {
+          return {
+            ...item,
+            winningBid
+          };
+        }
+        return item;
+      });
+
+      setItems(updatedItems);
+      setSearchedItem({
+        ...searchedItem,
+        winningBid
+      });
+      setIsEditingBid(false);
+    } catch (err) {
+      console.error('Error editing winning bid:', err);
+      alert('Failed to update winning bid. Please try again.');
+    }
   };
 
   // Add function to handle sorting
@@ -366,8 +463,215 @@ export default function SilentAuctionAdmin() {
     });
   };
 
+  // Handle editing an item
+  const handleEditItem = (item: Item) => {
+    setEditingItem(item);
+    setEditItemName(item.name);
+    setEditItemId(item.id);
+    setEditItemSection(item.section);
+  };
+
+  // Handle saving edited item
+  const handleSaveItem = async () => {
+    if (!editingItem || !editItemName || !editItemId || !editItemSection) {
+      alert('Please fill in all fields');
+      return;
+    }
+
+    // Check if ID already exists (and it's not the current item)
+    if (editItemId !== editingItem.id && items.some(item => item.id === editItemId)) {
+      alert(`Item ID ${editItemId} already exists`);
+      return;
+    }
+
+    try {
+      // If ID changed, we need to delete old and create new (since ID is primary key)
+      if (editItemId !== editingItem.id) {
+        // Create new item with new ID
+        await itemsService.create({
+          id: editItemId,
+          name: editItemName,
+          section: editItemSection,
+          winningBid: editingItem.winningBid
+        });
+        // Delete old item
+        await itemsService.delete(editingItem.id);
+      } else {
+        // Just update the item
+        await itemsService.update(editingItem.id, {
+          name: editItemName,
+          section: editItemSection
+        });
+      }
+      
+      // Clear edit state
+      setEditingItem(null);
+      setEditItemName('');
+      setEditItemId('');
+      setEditItemSection('');
+    } catch (err) {
+      console.error('Error saving item:', err);
+      alert('Failed to save item. Please try again.');
+    }
+  };
+
+  // Handle deleting an item
+  const handleDeleteItem = async (item: Item) => {
+    if (item.winningBid) {
+      if (!window.confirm(`Item "${item.name}" has a winning bid. Are you sure you want to delete it? This will also remove the bid from the attendee's won items.`)) {
+        return;
+      }
+    } else {
+      if (!window.confirm(`Are you sure you want to delete item "${item.name}"? This action cannot be undone.`)) {
+        return;
+      }
+    }
+
+    try {
+      // If item has a winning bid, remove it from attendee's won items
+      if (item.winningBid) {
+        const attendee = attendees.find(att => att.bidNum === item.winningBid?.bidNum);
+        if (attendee) {
+          const updatedWonItems = attendee.wonItems.filter(id => id !== item.id);
+          await attendeesService.update(attendee.bidNum, { wonItems: updatedWonItems });
+        }
+      }
+      
+      await itemsService.delete(item.id);
+      
+      // Clear searched item if it was deleted
+      if (searchedItem?.id === item.id) {
+        setSearchedItem(null);
+        setSelectedItemId('');
+      }
+    } catch (err) {
+      console.error('Error deleting item:', err);
+      alert('Failed to delete item. Please try again.');
+    }
+  };
+
+  // Handle editing an attendee
+  const handleEditAttendee = (attendee: Attendee) => {
+    setEditingAttendee(attendee);
+    setEditAttendeeName(attendee.name);
+    setEditAttendeeBidNum(attendee.bidNum);
+  };
+
+  // Handle saving edited attendee
+  const handleSaveAttendee = async () => {
+    if (!editingAttendee || !editAttendeeName || !editAttendeeBidNum) {
+      alert('Please fill in all fields');
+      return;
+    }
+
+    // Check if bid number already exists (and it's not the current attendee)
+    if (editAttendeeBidNum !== editingAttendee.bidNum && attendees.some(att => att.bidNum === editAttendeeBidNum)) {
+      alert(`Bid # ${editAttendeeBidNum} already assigned`);
+      return;
+    }
+
+    try {
+      // If bid number changed, we need to update all related items' winning bids
+      if (editAttendeeBidNum !== editingAttendee.bidNum) {
+        // Update all items with this attendee's winning bids
+        const itemsToUpdate = items.filter(item => 
+          item.winningBid && item.winningBid.bidNum === editingAttendee.bidNum
+        );
+        
+        for (const item of itemsToUpdate) {
+          if (item.winningBid) {
+            await itemsService.update(item.id, {
+              winningBid: {
+                bidNum: editAttendeeBidNum,
+                amount: item.winningBid.amount
+              }
+            });
+          }
+        }
+        
+        // Create new attendee with new bid number
+        await attendeesService.create({
+          bidNum: editAttendeeBidNum,
+          name: editAttendeeName,
+          wonItems: editingAttendee.wonItems
+        });
+        // Delete old attendee
+        await attendeesService.delete(editingAttendee.bidNum);
+      } else {
+        // Just update the attendee
+        await attendeesService.update(editingAttendee.bidNum, {
+          name: editAttendeeName
+        });
+      }
+      
+      // Clear edit state
+      setEditingAttendee(null);
+      setEditAttendeeName('');
+      setEditAttendeeBidNum('');
+    } catch (err) {
+      console.error('Error saving attendee:', err);
+      alert('Failed to save attendee. Please try again.');
+    }
+  };
+
+  // Handle deleting an attendee
+  const handleDeleteAttendee = async (attendee: Attendee) => {
+    const wonItemsCount = items.filter(item => 
+      item.winningBid && item.winningBid.bidNum === attendee.bidNum
+    ).length;
+    
+    if (wonItemsCount > 0) {
+      if (!window.confirm(`Attendee "${attendee.name}" has ${wonItemsCount} winning bid(s). Are you sure you want to delete? This will remove the winning bids from those items.`)) {
+        return;
+      }
+    } else {
+      if (!window.confirm(`Are you sure you want to delete attendee "${attendee.name}"? This action cannot be undone.`)) {
+        return;
+      }
+    }
+
+    try {
+      // Remove winning bids from all items won by this attendee
+      const itemsToUpdate = items.filter(item => 
+        item.winningBid && item.winningBid.bidNum === attendee.bidNum
+      );
+      
+      for (const item of itemsToUpdate) {
+        await itemsService.update(item.id, { winningBid: null });
+      }
+      
+      await attendeesService.delete(attendee.bidNum);
+      
+      // Clear searched attendee if it was deleted
+      if (searchedAttendee?.bidNum === attendee.bidNum) {
+        setSearchedAttendee(null);
+        setSearchResults(null);
+      }
+    } catch (err) {
+      console.error('Error deleting attendee:', err);
+      alert('Failed to delete attendee. Please try again.');
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+        <div className="text-center">
+          <div className="text-xl font-semibold mb-2">Loading...</div>
+          <div className="text-gray-600">Connecting to database...</div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-100">
+      {error && (
+        <div className="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 mb-4">
+          <p className="font-bold">Warning</p>
+          <p>{error}</p>
+        </div>
+      )}
       {/* Print Mode */}
       {printMode && searchedAttendee && searchResults && (
         <div className="print-only p-8 bg-white">
@@ -505,6 +809,7 @@ export default function SilentAuctionAdmin() {
                           <th className="p-2">ID</th>
                           <th className="p-2">Name</th>
                           <th className="p-2">Section</th>
+                          <th className="p-2">Actions</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -513,11 +818,91 @@ export default function SilentAuctionAdmin() {
                             <td className="p-2">{item.id}</td>
                             <td className="p-2">{item.name}</td>
                             <td className="p-2">{item.section}</td>
+                            <td className="p-2">
+                              <div className="flex space-x-2">
+                                <button
+                                  onClick={() => handleEditItem(item)}
+                                  className="text-blue-600 hover:text-blue-800 text-sm"
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteItem(item)}
+                                  className="text-red-600 hover:text-red-800 text-sm"
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            </td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
+                  
+                  {/* Edit Item Form */}
+                  {editingItem && (
+                    <div className="mt-4 p-4 bg-gray-50 rounded border">
+                      <h4 className="font-medium mb-3">Edit Item</h4>
+                      <div className="space-y-3">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Item Name
+                          </label>
+                          <input
+                            type="text"
+                            value={editItemName}
+                            onChange={(e) => setEditItemName(e.target.value)}
+                            className="w-full p-2 border rounded"
+                            required
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Item ID Number
+                          </label>
+                          <input
+                            type="text"
+                            value={editItemId}
+                            onChange={(e) => setEditItemId(e.target.value)}
+                            className="w-full p-2 border rounded"
+                            required
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Section
+                          </label>
+                          <input
+                            type="text"
+                            value={editItemSection}
+                            onChange={(e) => setEditItemSection(e.target.value)}
+                            className="w-full p-2 border rounded"
+                            required
+                          />
+                        </div>
+                        <div className="flex space-x-2">
+                          <button
+                            onClick={handleSaveItem}
+                            className="flex-1 bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700"
+                          >
+                            Save Changes
+                          </button>
+                          <button
+                            onClick={() => {
+                              setEditingItem(null);
+                              setEditItemName('');
+                              setEditItemId('');
+                              setEditItemSection('');
+                            }}
+                            className="flex-1 bg-gray-500 text-white py-2 px-4 rounded hover:bg-gray-600"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -567,6 +952,7 @@ export default function SilentAuctionAdmin() {
                         <tr>
                           <th className="p-2">Bid #</th>
                           <th className="p-2">Name</th>
+                          <th className="p-2">Actions</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -574,11 +960,78 @@ export default function SilentAuctionAdmin() {
                           <tr key={attendee.bidNum} className="border-t">
                             <td className="p-2">{attendee.bidNum}</td>
                             <td className="p-2">{attendee.name}</td>
+                            <td className="p-2">
+                              <div className="flex space-x-2">
+                                <button
+                                  onClick={() => handleEditAttendee(attendee)}
+                                  className="text-blue-600 hover:text-blue-800 text-sm"
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteAttendee(attendee)}
+                                  className="text-red-600 hover:text-red-800 text-sm"
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            </td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
+                  
+                  {/* Edit Attendee Form */}
+                  {editingAttendee && (
+                    <div className="mt-4 p-4 bg-gray-50 rounded border">
+                      <h4 className="font-medium mb-3">Edit Attendee</h4>
+                      <div className="space-y-3">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Attendee Name
+                          </label>
+                          <input
+                            type="text"
+                            value={editAttendeeName}
+                            onChange={(e) => setEditAttendeeName(e.target.value)}
+                            className="w-full p-2 border rounded"
+                            required
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Bid Number
+                          </label>
+                          <input
+                            type="text"
+                            value={editAttendeeBidNum}
+                            onChange={(e) => setEditAttendeeBidNum(e.target.value)}
+                            className="w-full p-2 border rounded"
+                            required
+                          />
+                        </div>
+                        <div className="flex space-x-2">
+                          <button
+                            onClick={handleSaveAttendee}
+                            className="flex-1 bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700"
+                          >
+                            Save Changes
+                          </button>
+                          <button
+                            onClick={() => {
+                              setEditingAttendee(null);
+                              setEditAttendeeName('');
+                              setEditAttendeeBidNum('');
+                            }}
+                            className="flex-1 bg-gray-500 text-white py-2 px-4 rounded hover:bg-gray-600"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -776,57 +1229,63 @@ export default function SilentAuctionAdmin() {
                     </div>
                   ) : (
                     <form onSubmit={handleAddWinningBid} className="space-y-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Bid Number
-                        </label>
-                        <input
-                          type="text"
-                          value={winningBidNum}
-                          onChange={(e) => {
-                            setWinningBidNum(e.target.value);
-                            // Find attendee name as user types
-                            const attendee = attendees.find(a => a.bidNum === e.target.value);
-                            if (attendee) {
-                              // Show attendee name in a small label below the input
-                              const nameLabel = document.getElementById('attendee-name-label');
-                              if (nameLabel) {
-                                nameLabel.textContent = `Attendee: ${attendee.name}`;
-                                nameLabel.classList.remove('hidden');
+                      <div className='flex space-x-4'>
+                        <div className='flex-1'>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Bid Number
+                          </label>
+                          <input
+                            type="text"
+                            value={winningBidNum}
+                            onChange={(e) => {
+                              setWinningBidNum(e.target.value);
+                              // Find attendee name as user types
+                              const attendee = attendees.find(a => a.bidNum === e.target.value);
+                              if (attendee) {
+                                // Show attendee name in a small label below the input
+                                const nameLabel = document.getElementById('attendee-name-label');
+                                if (nameLabel) {
+                                  nameLabel.textContent = `${attendee.name}`;
+                                  nameLabel.classList.remove('hidden');
+                                  nameLabel.classList.remove('text-red-600');
+                                }
+                              } else {
+                                const nameLabel = document.getElementById('attendee-name-label');
+                                if (nameLabel) {
+                                  nameLabel.textContent = 'No attendee found with this bid number';
+                                  nameLabel.classList.remove('hidden');
+                                  nameLabel.classList.add('text-red-600');
+                                }
                               }
-                            } else {
-                              const nameLabel = document.getElementById('attendee-name-label');
-                              if (nameLabel) {
-                                nameLabel.textContent = 'No attendee found with this bid number';
-                                nameLabel.classList.remove('hidden');
-                              }
-                            }
-                          }}
-                          className="w-full p-2 border rounded"
-                          required
-                        />
-                        <div id="attendee-name-label" className="mt-1 text-sm text-gray-600 hidden"></div>
+                            }}
+                            className="w-full p-2 border rounded"
+                            required
+                          />
+                          <div id="attendee-name-label" className="mt-1 text-lg text-green-600 hidden font-bold"></div>
+                        </div>
+                        <div className='flex-1'>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Amount
+                          </label>
+                          <input
+                            type="number"
+                            value={winningBidAmount}
+                            onChange={(e) => setWinningBidAmount(e.target.value)}
+                            step="0.01"
+                            min="0"
+                            className="w-full p-2 border rounded"
+                            required
+                          />
+                        </div>
                       </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Amount
-                        </label>
-                        <input
-                          type="number"
-                          value={winningBidAmount}
-                          onChange={(e) => setWinningBidAmount(e.target.value)}
-                          step="0.01"
-                          min="0"
-                          className="w-full p-2 border rounded"
-                          required
-                        />
+                      <div className='flex'>
+                        <button
+                          type="submit"
+                          className="w-full bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700 flex-none"
+                        >
+                          Record Winning Bid
+                        </button>
                       </div>
-                      <button
-                        type="submit"
-                        className="w-full bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700"
-                      >
-                        Record Winning Bid
-                      </button>
                     </form>
                   )}
                 </div>
@@ -877,7 +1336,7 @@ export default function SilentAuctionAdmin() {
                           <th className="p-2">Name</th>
                           <th className="p-2">Items Won</th>
                           <th className="p-2 text-right">Total Spent</th>
-                          <th className="p-2"></th>
+                          <th className="p-2">Actions</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -908,23 +1367,43 @@ export default function SilentAuctionAdmin() {
                               }</td>
                               <td className="p-2 text-right">${calculateAttendeeTotal(attendee).toFixed(2)}</td>
                               <td className="p-2">
-                                <button 
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setSearchedAttendee(attendee);
-                                    setSearchResults(items.filter(item => 
-                                      item.winningBid && item.winningBid.bidNum === attendee.bidNum
-                                    ));
-                                    setPrintMode(true);
-                                    setTimeout(() => {
-                                      window.print();
-                                      setPrintMode(false);
-                                    }, 100);
-                                  }}
-                                  className="text-blue-600 hover:text-blue-800"
-                                >
-                                  Print
-                                </button>
+                                <div className="flex space-x-2">
+                                  <button 
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setSearchedAttendee(attendee);
+                                      setSearchResults(items.filter(item => 
+                                        item.winningBid && item.winningBid.bidNum === attendee.bidNum
+                                      ));
+                                      setPrintMode(true);
+                                      setTimeout(() => {
+                                        window.print();
+                                        setPrintMode(false);
+                                      }, 100);
+                                    }}
+                                    className="text-blue-600 hover:text-blue-800 text-sm"
+                                  >
+                                    Print
+                                  </button>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleEditAttendee(attendee);
+                                    }}
+                                    className="text-blue-600 hover:text-blue-800 text-sm"
+                                  >
+                                    Edit
+                                  </button>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleDeleteAttendee(attendee);
+                                    }}
+                                    className="text-red-600 hover:text-red-800 text-sm"
+                                  >
+                                    Delete
+                                  </button>
+                                </div>
                               </td>
                             </tr>
                           ))}
@@ -941,16 +1420,75 @@ export default function SilentAuctionAdmin() {
                 <div className="border p-4 rounded">
                   <div className="flex justify-between items-center mb-4">
                     <h3 className="font-medium text-lg">Attendee Information</h3>
-                    <button 
-                      onClick={handlePrint}
-                      className="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700"
-                    >
-                      Print Receipt
-                    </button>
+                    <div className="flex space-x-2">
+                      <button 
+                        onClick={handlePrint}
+                        className="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700"
+                      >
+                        Print Receipt
+                      </button>
+                      <button
+                        onClick={() => handleEditAttendee(searchedAttendee)}
+                        className="bg-yellow-500 text-white px-3 py-1 rounded text-sm hover:bg-yellow-600"
+                      >
+                        Edit
+                      </button>
+                    </div>
                   </div>
                   
                   <p><strong>Name:</strong> {searchedAttendee.name}</p>
                   <p><strong>Bid #:</strong> {searchedAttendee.bidNum}</p>
+                  
+                  {/* Edit Attendee Form */}
+                  {editingAttendee && editingAttendee.bidNum === searchedAttendee.bidNum && (
+                    <div className="mt-4 p-4 bg-gray-50 rounded border">
+                      <h4 className="font-medium mb-3">Edit Attendee</h4>
+                      <div className="space-y-3">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Attendee Name
+                          </label>
+                          <input
+                            type="text"
+                            value={editAttendeeName}
+                            onChange={(e) => setEditAttendeeName(e.target.value)}
+                            className="w-full p-2 border rounded"
+                            required
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Bid Number
+                          </label>
+                          <input
+                            type="text"
+                            value={editAttendeeBidNum}
+                            onChange={(e) => setEditAttendeeBidNum(e.target.value)}
+                            className="w-full p-2 border rounded"
+                            required
+                          />
+                        </div>
+                        <div className="flex space-x-2">
+                          <button
+                            onClick={handleSaveAttendee}
+                            className="flex-1 bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700"
+                          >
+                            Save Changes
+                          </button>
+                          <button
+                            onClick={() => {
+                              setEditingAttendee(null);
+                              setEditAttendeeName('');
+                              setEditAttendeeBidNum('');
+                            }}
+                            className="flex-1 bg-gray-500 text-white py-2 px-4 rounded hover:bg-gray-600"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                   
                   <h3 className="font-medium mt-4 mb-2">Won Items</h3>
                   {searchResults && searchResults.length > 0 ? (
@@ -1023,6 +1561,7 @@ export default function SilentAuctionAdmin() {
                         <th className="p-2">Section</th>
                         <th className="p-2">Winning Bid</th>
                         <th className="p-2">Winner</th>
+                        <th className="p-2">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1037,6 +1576,22 @@ export default function SilentAuctionAdmin() {
                               ? `${attendees.find(a => a.bidNum === item.winningBid?.bidNum)?.name || 'Unknown'} (#${item.winningBid?.bidNum})`
                               : '-'
                           }</td>
+                          <td className="p-2">
+                            <div className="flex space-x-2">
+                              <button
+                                onClick={() => handleEditItem(item)}
+                                className="text-blue-600 hover:text-blue-800 text-sm"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                onClick={() => handleDeleteItem(item)}
+                                className="text-red-600 hover:text-red-800 text-sm"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </td>
                         </tr>
                       ))}
                       <tr className="border-t font-bold bg-gray-50">
@@ -1045,9 +1600,74 @@ export default function SilentAuctionAdmin() {
                           total + (item.winningBid?.amount || 0), 0).toFixed(2)
                         }</td>
                         <td className="p-2"></td>
+                        <td className="p-2"></td>
                       </tr>
                     </tbody>
                   </table>
+                  
+                  {/* Edit Item Form */}
+                  {editingItem && (
+                    <div className="mt-4 p-4 bg-gray-50 rounded border">
+                      <h4 className="font-medium mb-3">Edit Item</h4>
+                      <div className="space-y-3">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Item Name
+                          </label>
+                          <input
+                            type="text"
+                            value={editItemName}
+                            onChange={(e) => setEditItemName(e.target.value)}
+                            className="w-full p-2 border rounded"
+                            required
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Item ID Number
+                          </label>
+                          <input
+                            type="text"
+                            value={editItemId}
+                            onChange={(e) => setEditItemId(e.target.value)}
+                            className="w-full p-2 border rounded"
+                            required
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Section
+                          </label>
+                          <input
+                            type="text"
+                            value={editItemSection}
+                            onChange={(e) => setEditItemSection(e.target.value)}
+                            className="w-full p-2 border rounded"
+                            required
+                          />
+                        </div>
+                        <div className="flex space-x-2">
+                          <button
+                            onClick={handleSaveItem}
+                            className="flex-1 bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700"
+                          >
+                            Save Changes
+                          </button>
+                          <button
+                            onClick={() => {
+                              setEditingItem(null);
+                              setEditItemName('');
+                              setEditItemId('');
+                              setEditItemSection('');
+                            }}
+                            className="flex-1 bg-gray-500 text-white py-2 px-4 rounded hover:bg-gray-600"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <p className="italic text-gray-500 mb-8">No items added yet</p>
@@ -1064,6 +1684,7 @@ export default function SilentAuctionAdmin() {
                         <th className="p-2">Name</th>
                         <th className="p-2">Items Won</th>
                         <th className="p-2 text-right">Total Spent</th>
+                        <th className="p-2">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1077,10 +1698,77 @@ export default function SilentAuctionAdmin() {
                             ).length
                           }</td>
                           <td className="p-2 text-right">${calculateAttendeeTotal(attendee).toFixed(2)}</td>
+                          <td className="p-2">
+                            <div className="flex space-x-2">
+                              <button
+                                onClick={() => handleEditAttendee(attendee)}
+                                className="text-blue-600 hover:text-blue-800 text-sm"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                onClick={() => handleDeleteAttendee(attendee)}
+                                className="text-red-600 hover:text-red-800 text-sm"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
+                  
+                  {/* Edit Attendee Form */}
+                  {editingAttendee && (
+                    <div className="mt-4 p-4 bg-gray-50 rounded border">
+                      <h4 className="font-medium mb-3">Edit Attendee</h4>
+                      <div className="space-y-3">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Attendee Name
+                          </label>
+                          <input
+                            type="text"
+                            value={editAttendeeName}
+                            onChange={(e) => setEditAttendeeName(e.target.value)}
+                            className="w-full p-2 border rounded"
+                            required
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Bid Number
+                          </label>
+                          <input
+                            type="text"
+                            value={editAttendeeBidNum}
+                            onChange={(e) => setEditAttendeeBidNum(e.target.value)}
+                            className="w-full p-2 border rounded"
+                            required
+                          />
+                        </div>
+                        <div className="flex space-x-2">
+                          <button
+                            onClick={handleSaveAttendee}
+                            className="flex-1 bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700"
+                          >
+                            Save Changes
+                          </button>
+                          <button
+                            onClick={() => {
+                              setEditingAttendee(null);
+                              setEditAttendeeName('');
+                              setEditAttendeeBidNum('');
+                            }}
+                            className="flex-1 bg-gray-500 text-white py-2 px-4 rounded hover:bg-gray-600"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <p className="italic text-gray-500">No attendees added yet</p>
