@@ -2,7 +2,7 @@ import { useState, FormEvent } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function Login() {
-  const { signIn, signUp } = useAuth();
+  const { signIn, signUp, accessDeniedMessage, clearAccessDenied } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
@@ -12,6 +12,7 @@ export default function Login() {
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    clearAccessDenied();
     setError(null);
     setMessage(null);
     setLoading(true);
@@ -82,6 +83,11 @@ export default function Login() {
               )}
             </div>
 
+            {accessDeniedMessage && (
+              <div className="text-sm text-amber-800 bg-amber-50 px-3 py-2 rounded-md">
+                {accessDeniedMessage}
+              </div>
+            )}
             {error && (
               <div className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-md">
                 {error}
