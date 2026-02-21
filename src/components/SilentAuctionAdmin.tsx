@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, FormEvent } from 'react';
 import { itemsService, attendeesService, Item, Attendee } from '../services/database';
 
 export default function SilentAuctionAdmin() {
@@ -192,7 +192,8 @@ export default function SilentAuctionAdmin() {
   };
   
   // Add winning bid to item
-  const handleAddWinningBid = async () => {
+  const handleAddWinningBid = async (e?: FormEvent) => {
+    e?.preventDefault();
     if (!winningBidNum || !winningBidAmount || !searchedItem) {
       alert('Please fill in all fields');
       return;
@@ -260,7 +261,8 @@ export default function SilentAuctionAdmin() {
       setWinningBidAmount('');
     } catch (err) {
       console.error('Error adding winning bid:', err);
-      alert('Failed to record winning bid. Please try again.');
+      const message = err instanceof Error ? err.message : String(err);
+      alert(`Failed to record winning bid: ${message}\n\nIf tables are missing, run supabase-schema.sql in Supabase → SQL Editor.`);
     }
   };
   
@@ -435,7 +437,8 @@ export default function SilentAuctionAdmin() {
       setIsEditingBid(false);
     } catch (err) {
       console.error('Error editing winning bid:', err);
-      alert('Failed to update winning bid. Please try again.');
+      const message = err instanceof Error ? err.message : String(err);
+      alert(`Failed to update winning bid: ${message}\n\nIf tables are missing, run supabase-schema.sql in Supabase → SQL Editor.`);
     }
   };
 
@@ -1141,7 +1144,7 @@ export default function SilentAuctionAdmin() {
                     <div className="p-3 bg-green-100 rounded">
                       <div className="flex justify-between items-start">
                         <div>
-                          <p className="font-medium">Winning Bid Already Recorded</p>
+                          <p className="font-medium">Winning Bid Recorded</p>
                           <p><strong>Bid #:</strong> {searchedItem.winningBid.bidNum}</p>
                           <p><strong>Amount:</strong> ${searchedItem.winningBid.amount.toFixed(2)}</p>
                           <p><strong>Winner:</strong> {
