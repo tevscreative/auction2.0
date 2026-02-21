@@ -125,8 +125,8 @@ export default function SilentAuctionAdmin() {
   
   // Add new auction item
   const handleAddItem = async () => {
-    if (!itemName || !itemId || !itemSection) {
-      alert('Please fill in all fields');
+    if (!itemName || !itemId) {
+      alert('Please fill in Name and Item ID');
       return;
     }
     
@@ -476,8 +476,8 @@ export default function SilentAuctionAdmin() {
 
   // Handle saving edited item
   const handleSaveItem = async () => {
-    if (!editingItem || !editItemName || !editItemId || !editItemSection) {
-      alert('Please fill in all fields');
+    if (!editingItem || !editItemName || !editItemId) {
+      alert('Please fill in Name and Item ID');
       return;
     }
 
@@ -760,8 +760,8 @@ export default function SilentAuctionAdmin() {
           {activeTab === 'add-item' && (
             <div className="bg-white p-6 rounded-lg shadow-md">
               <h2 className="text-xl font-semibold mb-4">Add Auction Item</h2>
-              <div>
-                <div className="mb-4">
+              <div className='grid-span-full lg:grid lg:grid-cols-7 gap-4'>
+                <div className="lg:col-span-5">
                   <label className="block mb-1 font-medium">Item Name</label>
                   <input 
                     type="text" 
@@ -771,8 +771,8 @@ export default function SilentAuctionAdmin() {
                     onKeyPress={(e) => handleKeyPress(e, handleAddItem)}
                   />
                 </div>
-                <div className="mb-4">
-                  <label className="block mb-1 font-medium">Item ID Number</label>
+                <div className="lg:col-span-1">
+                  <label className="block mb-1 font-medium">Item ID #</label>
                   <input 
                     type="text" 
                     className="w-full p-2 border rounded"
@@ -782,8 +782,8 @@ export default function SilentAuctionAdmin() {
                     onKeyPress={(e) => handleKeyPress(e, handleAddItem)}
                   />
                 </div>
-                <div className="mb-4">
-                  <label className="block mb-1 font-medium">Section</label>
+                <div className="lg:col-span-1">
+                  <label className="block mb-1 font-medium">Section (optional)</label>
                   <input 
                     type="text" 
                     className="w-full p-2 border rounded"
@@ -795,7 +795,7 @@ export default function SilentAuctionAdmin() {
                 </div>
                 <button 
                   onClick={handleAddItem}
-                  className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+                  className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 lg:col-span-7 w-full"
                 >
                   Add Item
                 </button>
@@ -874,14 +874,13 @@ export default function SilentAuctionAdmin() {
                         </div>
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Section
+                            Section (optional)
                           </label>
                           <input
                             type="text"
                             value={editItemSection}
                             onChange={(e) => setEditItemSection(e.target.value)}
                             className="w-full p-2 border rounded"
-                            required
                           />
                         </div>
                         <div className="flex space-x-2">
@@ -1639,14 +1638,13 @@ export default function SilentAuctionAdmin() {
                         </div>
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Section
+                            Section (optional)
                           </label>
                           <input
                             type="text"
                             value={editItemSection}
                             onChange={(e) => setEditItemSection(e.target.value)}
                             className="w-full p-2 border rounded"
-                            required
                           />
                         </div>
                         <div className="flex space-x-2">
